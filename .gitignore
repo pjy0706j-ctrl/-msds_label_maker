@@ -1,0 +1,17 @@
+failure_logs/
+statistics/
+__pycache__/
+*.pyc
+dist/
+build/
+
+# 임시 렌더링 파일
+temp_preview_*.png
+label_render_*.png
+label_render.html
+print_label.html
+preview.html
+
+# 기타
+*.crdownload
+files.zip
