@@ -82,7 +82,7 @@ def panel(title: str, controls: list, width=None, expand=False,
 
 
 def main(page: ft.Page):
-    page.title = "MSDS Label Maker v1.3.0"
+    page.title = "MSDS Label Maker v1.0.0 (2026-06-16)"
     page.window.width  = 1600
     page.window.height = 960
     page.bgcolor = "#F1F3F5"
@@ -293,7 +293,7 @@ def main(page: ft.Page):
                 for f in get_selected_pictograms()
                 if os.path.exists(os.path.join(ghs_dir, f))]
         signal_val   = signal_field.value or ""
-        signal_color = "#C0392B" if signal_val == "위험" else "#E67E22" if signal_val == "경고" else "#6C757D"
+        signal_color = "#C0392B" if signal_val in ("위험", "경고") else "#212529"
 
         def sec(title, body):
             return ft.Column([
@@ -327,13 +327,72 @@ def main(page: ft.Page):
         page.update()
 
     def on_print_html(e):
-        """인쇄용 HTML을 생성하고 브라우저로 열기"""
-        html = build_html()
-        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "print_label.html")
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(html)
-        webbrowser.open(path)
-        status_bar.value = f"🖨 인쇄 창 열기: {path}"
+        """인쇄 전 확인 다이얼로그 표시 후 HTML 열기"""
+        _result = [None]
+
+        def _close_dlg(action):
+            _result[0] = action
+            dlg.open = False
+            try:
+                page.overlay.remove(dlg)
+            except Exception:
+                pass
+            page.update()
+            if action == "print":
+                html = build_html()
+                path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "print_label.html")
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(html)
+                webbrowser.open(path)
+                status_bar.value = f"🖨 인쇄 창 열기: {path}"
+                page.update()
+
+        dlg = ft.AlertDialog(
+            modal=False,
+            title=ft.Text("⚠  인쇄 전 필수 확인사항", size=15, weight=ft.FontWeight.BOLD,
+                          color="#C0392B"),
+            content=ft.Container(
+                content=ft.Column([
+                    ft.Text(
+                        "본 프로그램은 MSDS PDF에서 경고표지 항목을 자동으로 추출하며,\n"
+                        "추출 결과의 정확성을 100% 보장하지 않습니다.",
+                        size=12, color="#212529",
+                    ),
+                    ft.Divider(height=10, color="#DEE2E6"),
+                    ft.Text("인쇄 전 아래 항목을 반드시 직접 확인하세요.", size=12,
+                            weight=ft.FontWeight.BOLD, color="#343A40"),
+                    ft.Column([
+                        ft.Text("✔  제품명이 원본 MSDS와 일치하는지 확인", size=11, color="#495057"),
+                        ft.Text("✔  신호어(위험 / 경고)가 올바르게 적용됐는지 확인", size=11, color="#495057"),
+                        ft.Text("✔  유해·위험문구(H코드) 누락 또는 오기재 여부 확인", size=11, color="#495057"),
+                        ft.Text("✔  예방조치문구(P코드) 누락 또는 오기재 여부 확인", size=11, color="#495057"),
+                        ft.Text("✔  GHS 그림문자가 해당 물질에 맞게 선택됐는지 확인", size=11, color="#495057"),
+                        ft.Text("✔  공급자 정보(회사명·주소·긴급연락처)가 정확한지 확인", size=11, color="#495057"),
+                        ft.Text("✔  선택한 라벨 규격이 실제 라벨지(아이라벨)와 일치하는지 확인", size=11, color="#495057"),
+                    ], spacing=4),
+                    ft.Divider(height=10, color="#DEE2E6"),
+                    ft.Text(
+                        "※ 본 프로그램은 경고표지 작성을 보조하는 도구입니다.\n"
+                        "   법적 효력이 있는 최종 경고표지의 정확성에 대한 책임은\n"
+                        "   출력자 본인에게 있습니다.",
+                        size=11, color="#6C757D", italic=True,
+                    ),
+                ], spacing=8, tight=True),
+                width=480,
+            ),
+            actions=[
+                ft.TextButton("취소", on_click=lambda _: _close_dlg("cancel"),
+                              style=ft.ButtonStyle(color="#6C757D")),
+                ft.ElevatedButton(
+                    "확인 완료 — 인쇄 진행",
+                    on_click=lambda _: _close_dlg("print"),
+                    style=ft.ButtonStyle(bgcolor="#C0392B", color="white"),
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        page.overlay.append(dlg)
+        dlg.open = True
         page.update()
 
     def schedule_refresh(e=None):
@@ -594,9 +653,9 @@ def main(page: ft.Page):
     header = ft.Container(
         content=ft.Row([
             ft.Column([
-                ft.Text("🧪 MSDS Label Maker v1.3.0",
+                ft.Text("🧪 MSDS Label Maker v1.0.0",
                         size=20, weight=ft.FontWeight.BOLD, color="white"),
-                ft.Text("👨‍💻 박재영  |  🏢 LX글라스 연구기획팀  |  📅 2026-05-31",
+                ft.Text("👨‍💻 박재영  |  🏢 LX글라스 연구기획팀  |  📅 2026-06-16",
                         size=11, color="#ADB5BD"),
             ], spacing=2),
             ft.Container(expand=True),
@@ -618,4 +677,22 @@ def main(page: ft.Page):
     )
 
 
-ft.run(main)
+import sys
+
+_APP_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# PyInstaller 번들 실행 시 번들된 flet 클라이언트를 사용 (인터넷 다운로드 방지)
+if getattr(sys, "frozen", False):
+    os.environ.setdefault("FLET_VIEW_PATH", os.path.join(sys._MEIPASS, "flet_client"))
+
+# 회사 보안망 환경: localhost DNS 조회 차단 대응
+# getaddrinfo failed (Errno 11001) 방지 → IP 직접 지정
+import socket
+_orig_getaddrinfo = socket.getaddrinfo
+def _patched_getaddrinfo(host, *args, **kwargs):
+    if host == "localhost":
+        host = "127.0.0.1"
+    return _orig_getaddrinfo(host, *args, **kwargs)
+socket.getaddrinfo = _patched_getaddrinfo
+
+ft.run(main, assets_dir=_APP_DIR)
