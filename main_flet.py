@@ -327,28 +327,25 @@ def main(page: ft.Page):
         page.update()
 
     def on_print_html(e):
-        """인쇄 전 확인 다이얼로그 표시 후 HTML 열기"""
-        _result = [None]
+        """인쇄 전 확인 다이얼로그 표시 후 HTML 생성"""
 
-        def _close_dlg(action):
-            _result[0] = action
-            dlg.open = False
-            try:
-                page.overlay.remove(dlg)
-            except Exception:
-                pass
+        def _do_cancel(e):
+            page.dialog.open = False
             page.update()
-            if action == "print":
-                html = build_html()
-                path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "print_label.html")
-                with open(path, "w", encoding="utf-8") as f:
-                    f.write(html)
-                webbrowser.open(path)
-                status_bar.value = f"🖨 인쇄 창 열기: {path}"
-                page.update()
 
-        dlg = ft.AlertDialog(
-            modal=False,
+        def _do_print(e):
+            page.dialog.open = False
+            page.update()
+            html = build_html()
+            path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "print_label.html")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(html)
+            threading.Thread(target=webbrowser.open, args=(path,), daemon=True).start()
+            status_bar.value = f"🖨 인쇄 창 열기: {path}"
+            page.update()
+
+        page.dialog = ft.AlertDialog(
+            modal=True,
             title=ft.Text("⚠  인쇄 전 필수 확인사항", size=15, weight=ft.FontWeight.BOLD,
                           color="#C0392B"),
             content=ft.Container(
@@ -381,18 +378,17 @@ def main(page: ft.Page):
                 width=480,
             ),
             actions=[
-                ft.TextButton("취소", on_click=lambda _: _close_dlg("cancel"),
+                ft.TextButton("취소", on_click=_do_cancel,
                               style=ft.ButtonStyle(color="#6C757D")),
                 ft.ElevatedButton(
                     "확인 완료 — 인쇄 진행",
-                    on_click=lambda _: _close_dlg("print"),
+                    on_click=_do_print,
                     style=ft.ButtonStyle(bgcolor="#C0392B", color="white"),
                 ),
             ],
             actions_alignment=ft.MainAxisAlignment.END,
         )
-        page.overlay.append(dlg)
-        dlg.open = True
+        page.dialog.open = True
         page.update()
 
     def schedule_refresh(e=None):
