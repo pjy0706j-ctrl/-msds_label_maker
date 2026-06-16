@@ -398,7 +398,7 @@ def main(page: ft.Page):
         modal = ft.Container(
             expand=True,
             bgcolor="#80000000",
-            alignment=ft.alignment.center,
+            alignment=ft.Alignment(0, 0),
             content=card,
         )
         modal_ref[0] = modal
