@@ -6,6 +6,8 @@ import os
 import threading
 import fitz as _fitz
 
+from safety_sign_tab import build_safety_sign_tab
+
 from config import label_specs
 from msds_parser import (
     extract_text_from_pdf_path,
@@ -92,19 +94,32 @@ def main(page: ft.Page):
     # ── 상태 변수 ──────────────────────────────────────────
     current_doc       = None
     current_page_idx  = 0
+    current_file_path = [None]
     preview_serial    = [0]
     raw_text_store    = [""]
-    _debounce_timer   = [None]    # 자동 갱신 디바운스 타이머
-    _render_token     = [0]       # 렌더링 취소 토큰 (새 요청 시 증가)
-    _render_thread    = [None]    # 현재 렌더링 스레드
+    _debounce_timer   = [None]
+    _render_token     = [0]
+    _pdf_scale        = [1.0]      # PDF 뷰어 확대/축소 배율
 
     # ── 공통 위젯 ─────────────────────────────────────────
     selected_pdf_text  = ft.Text("파일 없음", size=12, color="#6C757D", expand=True)
     page_number_text   = ft.Text("0 / 0", size=12, width=60)
+    zoom_label         = ft.Text("100%", size=12, width=40)
     status_bar         = ft.Text("PDF 파일을 선택하세요.", size=12, color="#495057")
 
-    pdf_image = ft.Image(src="", width=440, height=580, fit=ft.ImageFit.FIT_WIDTH
-                         if hasattr(ft, "ImageFit") else None)
+    # PDF 뷰어 영역: 가로+세로 스크롤 지원 (확대 시 가로 스크롤 가능)
+    _PDF_VIEW_W = 440
+    pdf_view_area = ft.Column(   # 실제 페이지 컨트롤이 들어가는 내부 Column (세로 스크롤)
+        scroll=ft.ScrollMode.AUTO,
+        spacing=0,
+    )
+    pdf_view_wrapper = ft.Row(   # 가로 스크롤 래퍼 (확대 시 좌우 스크롤)
+        controls=[pdf_view_area],
+        scroll=ft.ScrollMode.AUTO,
+        width=_PDF_VIEW_W,
+        height=600,
+        vertical_alignment=ft.CrossAxisAlignment.START,
+    )
 
     raw_text_field = ft.TextField(
         multiline=True, min_lines=5, max_lines=12,
@@ -112,6 +127,7 @@ def main(page: ft.Page):
         hint_text="[원문 텍스트 보기] 버튼을 누르면 표시됩니다.",
         text_size=11,
         border_color="#CED4DA",
+        visible=False,
     )
 
     # ── 라벨 규격 ─────────────────────────────────────────
@@ -289,7 +305,7 @@ def main(page: ft.Page):
     def _build_flet_preview():
         """Edge 없을 때 사용하는 Flet 네이티브 미리보기"""
         ghs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ghs_images")
-        pics = [ft.Image(src=os.path.join(ghs_dir, f), width=46, height=46)
+        pics = [ft.Image(src=f"ghs_images/{f}", width=46, height=46)
                 for f in get_selected_pictograms()
                 if os.path.exists(os.path.join(ghs_dir, f))]
         signal_val   = signal_field.value or ""
@@ -323,7 +339,14 @@ def main(page: ft.Page):
         )
 
     def on_show_raw(e):
-        raw_text_field.value = raw_text_store[0][:8000] if raw_text_store[0] else "원문 없음"
+        # 토글: 원문 텍스트 ↔ PDF 뷰어
+        if raw_text_field.visible:
+            raw_text_field.visible = False
+            pdf_view_area.visible  = True
+        else:
+            raw_text_field.value   = raw_text_store[0][:8000] if raw_text_store[0] else "원문 없음"
+            raw_text_field.visible = True
+            pdf_view_area.visible  = False
         page.update()
 
     def on_print_html(e):
@@ -423,7 +446,59 @@ def main(page: ft.Page):
         _cb.on_change = schedule_refresh
     selected_label_type.on_select = lambda e: (update_font_defaults(), schedule_refresh())
 
-    # ── PDF 미리보기 ──────────────────────────────────────
+    # ── PDF 뷰어 (이미지 + 투명 텍스트 레이어 → 드래그 선택 가능) ────────
+    def _build_page_view(pdf_pg) -> ft.SelectionArea:
+        """한 페이지를 이미지+투명텍스트 스택으로 만들어 SelectionArea로 반환"""
+        # 기본 폭 기준 스케일 × 사용자 배율
+        scale  = (_PDF_VIEW_W / pdf_pg.rect.width) * _pdf_scale[0]
+        matrix = _fitz.Matrix(scale, scale)
+        pix    = pdf_pg.get_pixmap(matrix=matrix)
+
+        preview_serial[0] += 1
+        fname = f"temp_preview_{preview_serial[0]}.png"
+        pix.save(os.path.join(os.path.dirname(os.path.abspath(__file__)), fname))
+
+        W, H = pix.width, pix.height
+
+        # ── 투명 텍스트 레이어 생성 ──────────────────────────────
+        text_items: list[ft.Control] = []
+        for block in pdf_pg.get_text("dict", flags=_fitz.TEXT_PRESERVE_WHITESPACE)["blocks"]:
+            if block.get("type") != 0:   # 0 = 텍스트 블록만
+                continue
+            for line in block["lines"]:
+                for span in line["spans"]:
+                    txt = span["text"]
+                    if not txt:
+                        continue
+                    x0, y0, x1, y1 = (c * scale for c in span["bbox"])
+                    fsize = max(5.0, span["size"] * scale)
+                    text_items.append(
+                        ft.Container(
+                            content=ft.Text(
+                                txt,
+                                size=fsize,
+                                color="#00000001",   # 거의 투명 — 선택 시 파란 하이라이트만 보임
+                                no_wrap=True,
+                                weight=ft.FontWeight.W_400,
+                            ),
+                            left=x0,
+                            top=y0,
+                            width=max(1, x1 - x0),
+                            height=max(1, y1 - y0),
+                            clip_behavior=ft.ClipBehavior.HARD_EDGE,
+                        )
+                    )
+
+        stack = ft.Stack(
+            controls=[
+                ft.Image(src=fname, width=W, height=H),   # fit 없음 (버전 호환)
+                ft.Stack(controls=text_items, width=W, height=H),
+            ],
+            width=W,
+            height=H,
+        )
+        return ft.SelectionArea(content=stack)
+
     def load_pdf_preview(pdf_path):
         nonlocal current_doc, current_page_idx
         current_doc = _fitz.open(pdf_path)
@@ -433,15 +508,11 @@ def main(page: ft.Page):
     def show_pdf_page():
         if not current_doc:
             return
-        pg  = current_doc[current_page_idx]
-        pix = pg.get_pixmap(matrix=_fitz.Matrix(1.5, 1.5))
-        preview_serial[0] += 1
-        path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                            f"temp_preview_{preview_serial[0]}.png")
-        pix.save(path)
-        pdf_image.src = ""
-        page.update()
-        pdf_image.src = path
+        new_view = _build_page_view(current_doc[current_page_idx])
+        if pdf_view_area.controls:
+            pdf_view_area.controls[0] = new_view   # replace — 스크롤 위치 유지
+        else:
+            pdf_view_area.controls.append(new_view)
         page_number_text.value = f"{current_page_idx+1} / {len(current_doc)}"
         page.update()
 
@@ -457,6 +528,20 @@ def main(page: ft.Page):
             current_page_idx += 1
             show_pdf_page()
 
+    def zoom_in(e):
+        _pdf_scale[0] = min(_pdf_scale[0] + 0.25, 3.0)
+        zoom_label.value = f"{int(_pdf_scale[0] * 100)}%"
+        show_pdf_page()
+
+    def zoom_out(e):
+        _pdf_scale[0] = max(_pdf_scale[0] - 0.25, 0.5)
+        zoom_label.value = f"{int(_pdf_scale[0] * 100)}%"
+        show_pdf_page()
+
+    def zoom_reset(e):
+        _pdf_scale[0] = 1.0
+        zoom_label.value = "100%"
+        show_pdf_page()
 
     def select_file(e):
         root = tk.Tk()
@@ -467,17 +552,20 @@ def main(page: ft.Page):
         root.destroy()
         if not file_path:
             return
+        current_file_path[0] = file_path
         selected_pdf_text.value = os.path.basename(file_path)
         page.update()
 
         def _load_all():
-            # PDF 미리보기 먼저 (fitz는 스레드 내에서 안전)
-            load_pdf_preview(file_path)
-            # 분석 (별도 스레드 내부에서 inline 실행)
             file_name = os.path.basename(file_path)
-            status_bar.value = "⏳ PDF 분석 중..."
-            page.update()
             try:
+                # PDF 미리보기 먼저
+                status_bar.value = "⏳ PDF 로딩 중..."
+                page.update()
+                load_pdf_preview(file_path)
+                # 분석
+                status_bar.value = "⏳ PDF 분석 중..."
+                page.update()
                 text       = extract_text_from_pdf_path(file_path)
                 raw_text_store[0] = text
                 company    = detect_company_from_filename(file_name) or detect_company(text)
@@ -510,7 +598,7 @@ def main(page: ft.Page):
 
     # ── 레이아웃 조립 ─────────────────────────────────────
 
-    # 왼쪽: 원본 PDF
+    # 왼쪽: 원본 PDF (텍스트 드래그 가능 뷰어)
     col_pdf = panel(
         "📄 원본 MSDS PDF",
         [
@@ -522,9 +610,13 @@ def main(page: ft.Page):
                 ft.Button("◀", on_click=prev_page, width=50),
                 page_number_text,
                 ft.Button("▶", on_click=next_page, width=50),
-                ft.Button("📋 원문 텍스트", on_click=on_show_raw),
+                ft.VerticalDivider(width=10),
+                ft.Button("−", on_click=zoom_out, width=40),
+                zoom_label,
+                ft.Button("+", on_click=zoom_in, width=40),
+                ft.Button("↺", on_click=zoom_reset, width=40),
             ]),
-            pdf_image,
+            pdf_view_wrapper,
             raw_text_field,
         ],
         width=480,
@@ -668,23 +760,56 @@ def main(page: ft.Page):
                 ft.Text("👨‍💻 박재영  |  🏢 LX글라스 연구기획팀  |  📅 2026-06-16",
                         size=11, color="#ADB5BD"),
             ], spacing=2),
-            ft.Container(expand=True),
+            ft.Container(width=24),
+            ft.Container(
+                content=ft.Column([
+                    ft.Text(
+                        "⚠  본 프로그램은 MSDS 경고표지 작성 보조 도구입니다.",
+                        size=11, weight=ft.FontWeight.BOLD, color="#FFD166",
+                    ),
+                    ft.Text(
+                        "자동 추출 결과는 참고용이며, 출력 전 반드시 원본 MSDS와 대조·검토 후 사용하십시오.  "
+                        "│  Windows 64비트 전용",
+                        size=10, color="#ADB5BD",
+                    ),
+                ], spacing=1),
+                expand=True,
+            ),
             status_bar,
-        ]),
+        ], vertical_alignment=ft.CrossAxisAlignment.CENTER),
         bgcolor="#343A40",
         padding=ft.padding.Padding(left=16, right=16, top=10, bottom=10),
         border_radius=6,
     )
 
-    page.add(
-        header,
-        ft.Row(
-            controls=[col_pdf, col_edit, col_preview],
-            spacing=10,
+    ghs_tab_content = ft.Row(
+        controls=[col_pdf, col_edit, col_preview],
+        spacing=10,
+        expand=True,
+        vertical_alignment=ft.CrossAxisAlignment.START,
+    )
+    safety_sign_tab_content = build_safety_sign_tab(page)
+
+    main_tabs = ft.Tabs(
+        length=2,
+        selected_index=0,
+        expand=True,
+        content=ft.Column(
             expand=True,
-            vertical_alignment=ft.CrossAxisAlignment.START,
+            controls=[
+                ft.TabBar(tabs=[
+                    ft.Tab(label="GHS 경고표지 출력"),
+                    ft.Tab(label="산업안전보건표지 출력"),
+                ]),
+                ft.TabBarView(
+                    expand=True,
+                    controls=[ghs_tab_content, safety_sign_tab_content],
+                ),
+            ],
         ),
     )
+
+    page.add(header, main_tabs)
 
 
 import sys

@@ -68,7 +68,9 @@ def make_label_html(
     font_settings,
 ):
     product_name = safe_html_text(product_name)
+    _signal_raw  = signal_word
     signal_word  = safe_html_text(signal_word)
+    signal_color = "#C0392B" if _signal_raw in ("위험", "경고") else "#212529"
 
     # ── 공급자정보: \n → <br> (줄바꿈 유지) ──────────────
     supplier_info = html.escape(supplier_info or "").replace("\n", "<br>")
@@ -321,6 +323,7 @@ body {{
     width: 28%;
     line-height: 1.0;
     letter-spacing: -0.5px;
+    color: {signal_color};
 }}
 
 
