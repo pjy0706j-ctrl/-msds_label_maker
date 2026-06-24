@@ -312,17 +312,25 @@ def build_safety_sign_tab(page: ft.Page) -> ft.Row:
                             ft.Text(sign.name_kr, size=13, weight=ft.FontWeight.BOLD,
                                     text_align=ft.TextAlign.CENTER),
                             ft.Row([
-                                ft.IconButton(ft.Icons.REMOVE_CIRCLE_OUTLINE, icon_size=22,
-                                              tooltip="수량 -",
-                                              on_click=lambda e, p=sign.path: set_qty(p, quantities.get(p, 0) - 1)),
+                                ft.ElevatedButton(
+                                    "−", width=42, height=36, tooltip="수량 -",
+                                    style=ft.ButtonStyle(
+                                        bgcolor="#E9ECEF", color="#212529",
+                                        text_style=ft.TextStyle(size=18, weight=ft.FontWeight.BOLD),
+                                        padding=0),
+                                    on_click=lambda e, p=sign.path: set_qty(p, quantities.get(p, 0) - 1)),
                                 ft.Container(
-                                    content=ft.Text(f"{qty}", size=15, weight=ft.FontWeight.BOLD),
-                                    width=34, alignment=ft.Alignment(0, 0),
+                                    content=ft.Text(f"{qty}", size=16, weight=ft.FontWeight.BOLD),
+                                    width=40, alignment=ft.Alignment(0, 0),
                                 ),
-                                ft.IconButton(ft.Icons.ADD_CIRCLE_OUTLINE, icon_size=22,
-                                              tooltip="수량 +",
-                                              on_click=lambda e, p=sign.path: set_qty(p, quantities.get(p, 0) + 1)),
-                            ], alignment=ft.MainAxisAlignment.CENTER, spacing=2),
+                                ft.ElevatedButton(
+                                    "+", width=42, height=36, tooltip="수량 +",
+                                    style=ft.ButtonStyle(
+                                        bgcolor="#1971C2", color="white",
+                                        text_style=ft.TextStyle(size=18, weight=ft.FontWeight.BOLD),
+                                        padding=0),
+                                    on_click=lambda e, p=sign.path: set_qty(p, quantities.get(p, 0) + 1)),
+                            ], alignment=ft.MainAxisAlignment.CENTER, spacing=4),
                         ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=4),
                         padding=10, border=BORDER, border_radius=6, bgcolor="white",
                     )

@@ -5,6 +5,7 @@ MSDS Label Maker v2.0.0 - PyInstaller 패키징 설정
 import os
 import sys
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_data_files
 
 APP_DIR   = os.path.dirname(os.path.abspath(SPEC))
 FLET_DIR  = os.path.join(os.path.expanduser("~"), ".flet", "client",
@@ -22,6 +23,9 @@ datas = [
     # Flet 데스크톱 클라이언트 (Flutter 렌더러)
     (FLET_DIR, "flet_client"),
 ]
+
+# Flet 패키지 데이터 파일(icons.json 등) 포함 → ft.Icons 사용 시 런타임 오류 방지
+datas += collect_data_files("flet")
 
 # ── 숨겨진 임포트 ───────────────────────────────────────────
 hiddenimports = [
